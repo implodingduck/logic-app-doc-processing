@@ -64,11 +64,7 @@
                                 "type": "ServiceProvider",
                                 "inputs": {
                                     "parameters": {
-                                        "modelId": "prebuilt-layout",
-                                        "modelIdInputs": {
-                                            "content": "@base64ToBinary(item()?['contentBytes'])",
-                                            "outputContentType": "Markdown"
-                                        }
+                                        "modelId": "prebuilt-layout"
                                     },
                                     "serviceProviderConfiguration": {
                                         "connectionName": "documentIntelligence",
