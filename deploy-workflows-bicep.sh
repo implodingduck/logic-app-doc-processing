@@ -3,7 +3,6 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKFLOWS_DIR="${SCRIPT_DIR}/workflows"
-TERRAFORM_DIR="${SCRIPT_DIR}/terraform"
 CONNECTIONS_TEMPLATE="${SCRIPT_DIR}/connections.template.json"
 
 if [ ! -d "$WORKFLOWS_DIR" ]; then
@@ -22,20 +21,36 @@ if [ ! -f "$CONNECTIONS_TEMPLATE" ]; then
   exit 1
 fi
 
-# Extract values from Terraform outputs
-echo "Reading deployment outputs from Terraform..."
-TF_OUTPUT=$(cd "$TERRAFORM_DIR" && terraform output -json)
+# Extract Logic App name and resource group from the latest Bicep deployment
+echo "Reading deployment outputs from Bicep..."
 
-LOGICAPP_NAME=$(echo "$TF_OUTPUT" | python3 -c "import sys,json; print(json.load(sys.stdin)['logic_app_name']['value'])")
-RESOURCE_GROUP=$(echo "$TF_OUTPUT" | python3 -c "import sys,json; print(json.load(sys.stdin)['resource_group_name']['value'])")
-SQL_SERVER_FQDN=$(echo "$TF_OUTPUT" | python3 -c "import sys,json; print(json.load(sys.stdin)['sql_server_fqdn']['value'])")
-SQL_DATABASE_NAME=$(echo "$TF_OUTPUT" | python3 -c "import sys,json; print(json.load(sys.stdin)['sql_database_name']['value'])")
-DOC_INTEL_ENDPOINT=$(echo "$TF_OUTPUT" | python3 -c "import sys,json; print(json.load(sys.stdin)['form_recognizer_endpoint']['value'])")
-UAI_CLIENT_ID=$(echo "$TF_OUTPUT" | python3 -c "import sys,json; print(json.load(sys.stdin)['user_assigned_identity_client_id']['value'])")
-OFFICE365_CONNECTION_ID=$(echo "$TF_OUTPUT" | python3 -c "import sys,json; print(json.load(sys.stdin)['office365_connection_id']['value'])")
-OFFICE365_RUNTIME_URL=$(echo "$TF_OUTPUT" | python3 -c "import sys,json; print(json.load(sys.stdin)['office365_connection_runtime_url']['value'])")
+DEPLOYMENT_NAME=$(az deployment sub list \
+  --query "[?starts_with(name, 'logic-app-doc-processing-')] | sort_by(@, &properties.timestamp) | [-1].name" \
+  --output tsv 2>/dev/null)
+
+if [ -z "$DEPLOYMENT_NAME" ] || [ "$DEPLOYMENT_NAME" = "None" ]; then
+  echo "ERROR: Could not find a Bicep deployment. Make sure you have run './deploy-bicep.sh' first."
+  exit 1
+fi
+
+# Read all outputs in one call
+OUTPUTS=$(az deployment sub show --name "$DEPLOYMENT_NAME" --query "properties.outputs" --output json)
+
+LOGICAPP_NAME=$(echo "$OUTPUTS" | python3 -c "import sys,json; print(json.load(sys.stdin)['logicAppName']['value'])")
+RESOURCE_GROUP=$(echo "$OUTPUTS" | python3 -c "import sys,json; print(json.load(sys.stdin)['resourceGroupName']['value'])")
+SQL_SERVER_FQDN=$(echo "$OUTPUTS" | python3 -c "import sys,json; print(json.load(sys.stdin)['sqlServerFqdn']['value'])")
+SQL_DATABASE_NAME=$(echo "$OUTPUTS" | python3 -c "import sys,json; print(json.load(sys.stdin)['sqlDatabaseName']['value'])")
+DOC_INTEL_ENDPOINT=$(echo "$OUTPUTS" | python3 -c "import sys,json; print(json.load(sys.stdin)['formRecognizerEndpoint']['value'])")
+UAI_CLIENT_ID=$(echo "$OUTPUTS" | python3 -c "import sys,json; print(json.load(sys.stdin)['userAssignedIdentityClientId']['value'])")
+UAI_RESOURCE_ID=$(echo "$OUTPUTS" | python3 -c "import sys,json; print(json.load(sys.stdin)['userAssignedIdentityResourceId']['value'])")
+OFFICE365_CONNECTION_ID=$(echo "$OUTPUTS" | python3 -c "import sys,json; print(json.load(sys.stdin)['office365ConnectionId']['value'])")
+OFFICE365_RUNTIME_URL=$(echo "$OUTPUTS" | python3 -c "import sys,json; print(json.load(sys.stdin)['office365ConnectionRuntimeUrl']['value'])")
 SUBSCRIPTION_ID=$(az account show --query id --output tsv)
-LOCATION=$(echo "$TF_OUTPUT" | python3 -c "import sys,json; print(json.load(sys.stdin)['location']['value'])")
+LOCATION=$(echo "$OUTPUTS" | python3 -c "import sys,json; o=json.load(sys.stdin); print(o.get('location',{}).get('value',''))" 2>/dev/null || echo "")
+# Fallback: get location from the resource group
+if [ -z "$LOCATION" ]; then
+  LOCATION=$(az group show --name "$RESOURCE_GROUP" --query location --output tsv)
+fi
 
 echo "Logic App Name:    $LOGICAPP_NAME"
 echo "Resource Group:    $RESOURCE_GROUP"

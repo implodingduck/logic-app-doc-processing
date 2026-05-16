@@ -8,7 +8,7 @@
                 "kind": "Http",
                 "inputs": {
                     "statusCode": 200,
-                    "body": "Hello Logic App! From pipeline update"
+                    "body": "Hello Logic App! From pipeline online workflow, demo time!"
                 },
                 "runAfter": {}
             }

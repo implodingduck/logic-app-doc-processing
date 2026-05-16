@@ -401,10 +401,6 @@ resource "azapi_resource" "logicapp" {
             value = "dotnet"
           },
           {
-            name  = "WEBSITE_NODE_DEFAULT_VERSION",
-            value = "~20"
-          },
-          {
             name  = "AzureWebJobsStorage__credential",
             value = "managedidentity"
           },
@@ -443,6 +439,10 @@ resource "azapi_resource" "logicapp" {
           {
             name  = "LOGIC_APPS_POWERSHELL_VERSION",
             value = "7.4"
+          },
+          {
+            name  = "documentIntelligence_documentIntelligenceEndpoint",
+            value = azurerm_cognitive_account.form_recognizer.endpoint
           }
         ]
       }
@@ -575,13 +575,92 @@ resource "azurerm_role_assignment" "cognitive_contributor" {
 # Assign Azure AI User to resource group for the user assigned identity to access cognitive services
 resource "azurerm_role_assignment" "ai_user" {
   scope                = azurerm_resource_group.rg.id
-  role_definition_name = "Azure AI User"
+  role_definition_name = "Foundry User"
   principal_id         = azurerm_user_assigned_identity.this.principal_id
 }
 
 # Give the logic app system assigned identity Azure AI User on the doc intel instance
 resource "azurerm_role_assignment" "la_ai_user" {
   scope                = azurerm_cognitive_account.form_recognizer.id
-  role_definition_name = "Azure AI User"
+  role_definition_name = "Foundry User"
   principal_id         = azapi_resource.logicapp.identity.0.principal_id
+}
+
+# ─── Office 365 Managed API Connection ───────────────────────────────────────
+
+resource "azapi_resource" "office365_connection" {
+  type      = "Microsoft.Web/connections@2016-06-01"
+  name      = "office365-${local.func_name}"
+  parent_id = azurerm_resource_group.rg.id
+  location  = azurerm_resource_group.rg.location
+  tags      = local.tags
+
+  body = {
+    properties = {
+      displayName = "Office 365 Outlook"
+      api = {
+        id = "/subscriptions/${data.azurerm_client_config.current.subscription_id}/providers/Microsoft.Web/locations/${azurerm_resource_group.rg.location}/managedApis/office365"
+      }
+    }
+    kind = "V2"
+  }
+  schema_validation_enabled = false
+  response_export_values = ["properties.connectionRuntimeUrl"]
+}
+
+resource "azapi_resource" "office365_access_policy" {
+  type      = "Microsoft.Web/connections/accessPolicies@2016-06-01"
+  name      = "${azapi_resource.logicapp.name}-policy"
+  parent_id = azapi_resource.office365_connection.id
+
+  body = {
+    location = azurerm_resource_group.rg.location
+    properties = {
+      principal = {
+        type = "ActiveDirectory"
+        identity = {
+          tenantId = data.azurerm_client_config.current.tenant_id
+          objectId = azapi_resource.logicapp.identity.0.principal_id
+        }
+      }
+    }
+  }
+
+  schema_validation_enabled = false
+}
+
+output "sql_server_fqdn" {
+  value = azurerm_mssql_server.this.fully_qualified_domain_name
+}
+
+output "sql_database_name" {
+  value = azurerm_mssql_database.this.name
+}
+
+output "form_recognizer_endpoint" {
+  value = azurerm_cognitive_account.form_recognizer.endpoint
+}
+
+output "user_assigned_identity_client_id" {
+  value = azurerm_user_assigned_identity.this.client_id
+}
+
+output "office365_connection_id" {
+  value = azapi_resource.office365_connection.id
+}
+
+output "office365_connection_runtime_url" {
+  value = azapi_resource.office365_connection.output.properties.connectionRuntimeUrl
+}
+
+output "logic_app_name" {
+  value = azapi_resource.logicapp.name
+}
+
+output "resource_group_name" {
+  value = azurerm_resource_group.rg.name
+}
+
+output "location" {
+  value = azurerm_resource_group.rg.location
 }
